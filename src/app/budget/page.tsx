@@ -4,6 +4,9 @@ import { useState } from "react";
 import { PageFilters } from "@/components/shared/page-filters";
 import { BudgetGrid } from "@/components/shared/budget-grid";
 
+// Force dynamic rendering to avoid SSR issues with Firebase
+export const dynamic = 'force-dynamic';
+
 export default function BudgetPage() {
   // State for filters
   const [selectedMedia, setSelectedMedia] = useState<string>("all");
