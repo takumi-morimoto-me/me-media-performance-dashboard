@@ -62,7 +62,7 @@ export function SpreadsheetGrid({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
-  const saveTimeoutRef = useRef<NodeJS.Timeout>();
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const columns = isDailyView
     ? Array.from({ length: getDaysInMonth(selectedYear, selectedMonth) }, (_, i) => `${i + 1}日`)
@@ -198,7 +198,7 @@ export function SpreadsheetGrid({
     
     if (isDailyView) {
       const monthKey = `${selectedMonth}月`;
-      const monthlyValue = gridData[itemName]?.[monthKey] || 0;
+      const monthlyValue = Number(gridData[itemName]?.[monthKey] || 0);
       const dailyValue = daysInSelectedMonth > 0 ? monthlyValue / daysInSelectedMonth : 0;
       return dailyValue.toString();
     } else {
@@ -514,7 +514,6 @@ export function SpreadsheetGrid({
                       onValueChange={(newName) => handleRowNameChange(itemName, newName)}
                       onDelete={!isDailyView && itemNames.length > 1 ? () => handleRowDelete(itemName) : undefined}
                       className="min-w-[200px] w-[200px] z-[5] align-middle"
-                      isEditable={!isDailyView}
                     />
                     {columns.map((col, colIndex) => {
                       const isEditable = !isDailyView;
@@ -523,7 +522,7 @@ export function SpreadsheetGrid({
 
                       if (isDailyView) {
                         const monthKey = `${selectedMonth}月`;
-                        const monthlyValue = gridData[itemName]?.[monthKey] || 0;
+                        const monthlyValue = Number(gridData[itemName]?.[monthKey] || 0);
                         const dailyValue = daysInSelectedMonth > 0 ? monthlyValue / daysInSelectedMonth : 0;
                         displayValue = dailyValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
                         originalValue = displayValue;
