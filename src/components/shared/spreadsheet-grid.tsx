@@ -145,7 +145,7 @@ export function SpreadsheetGrid({
     if (isDailyView) return; // 日次ビューでは編集不可
 
     const itemNames = mediaConfig?.accountItems || [];
-    let newData = { ...gridData };
+    const newData = { ...gridData };
     
     changes.forEach(({row, col, value}) => {
       if (row >= itemNames.length || col >= columns.length) {
@@ -207,6 +207,8 @@ export function SpreadsheetGrid({
     }
   }, [mediaConfig?.accountItems, columns, gridData, isDailyView, selectedMonth, daysInSelectedMonth]);
 
+  const itemNames = mediaConfig?.accountItems || [];
+
   const {
     selectedCell,
     editingCell,
@@ -220,6 +222,7 @@ export function SpreadsheetGrid({
     inputRef,
   } = useSpreadsheet({
     data: gridData,
+    rowCount: itemNames.length,
     onDataChange: handleDataChange,
     onCellChange: handleCellChange,
     onBatchCellChange: handleBatchCellChange,
@@ -227,7 +230,7 @@ export function SpreadsheetGrid({
     getCellValue,
   });
 
-  const fetchBudgetData = async () => {
+  const fetchBudgetData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     setGridData({});
@@ -241,7 +244,7 @@ export function SpreadsheetGrid({
       await initializeExistingMedias();
       const media = await getMedia(selectedMedia);
       setMediaConfig(media);
-      
+
       const docId = `${selectedMedia}_${selectedYear}`;
       const docRef = doc(db, "budgets", docId);
       const docSnap = await getDoc(docRef);
@@ -265,11 +268,11 @@ export function SpreadsheetGrid({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedMedia, selectedYear]);
 
   useEffect(() => {
     fetchBudgetData();
-  }, [selectedMedia, selectedYear]); 
+  }, [selectedMedia, selectedYear, fetchBudgetData]); 
 
   useEffect(() => {
     return () => {
@@ -438,8 +441,6 @@ export function SpreadsheetGrid({
   if (error) {
     return <Card><CardContent><div className="flex h-96 items-center justify-center text-red-500">{error}</div></CardContent></Card>;
   }
-
-  const itemNames = mediaConfig?.accountItems || [];
 
   return (
     <Card>

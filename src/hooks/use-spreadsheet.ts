@@ -14,6 +14,7 @@ export interface SpreadsheetData {
 
 export interface UseSpreadsheetProps {
   data: SpreadsheetData;
+  rowCount: number;
   onDataChange?: (data: SpreadsheetData) => void;
   onCellChange?: (row: number, col: number, value: string) => void;
   onBatchCellChange?: (changes: Array<{row: number, col: number, value: string}>) => void;
@@ -22,6 +23,7 @@ export interface UseSpreadsheetProps {
 }
 
 export const useSpreadsheet = ({ 
+  rowCount,
   onCellChange,
   onBatchCellChange,
   isEditingDisabled = false, // デフォルトは編集可能
@@ -99,7 +101,13 @@ export const useSpreadsheet = ({
         case 'Enter':
           e.preventDefault();
           finishEditing(true);
-          // 編集完了時はセル移動せず、その場に留まる
+          const nextRow = row + 1;
+          if (nextRow < rowCount) {
+            const cellValue = getCellValue ? getCellValue(nextRow, col) : '';
+            startEditing(nextRow, col, cellValue);
+          } else {
+            setSelectedCell(null);
+          }
           break;
         case 'Tab':
           e.preventDefault();
@@ -180,7 +188,7 @@ export const useSpreadsheet = ({
         // 編集はEnter、F2、またはダブルクリックのみで開始
         break;
     }
-  }, [selectedCell, editingCell, finishEditing, startEditing, onCellChange, moveCell, isEditingDisabled]);
+  }, [selectedCell, editingCell, finishEditing, startEditing, onCellChange, moveCell, isEditingDisabled, rowCount, getCellValue, setSelectedCell]);
 
   // ペースト処理
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {

@@ -71,3 +71,11 @@ Before merging to `main`, ensure the following checks pass:
 - **Follow existing patterns**: Before creating new components or features, examine existing code to understand patterns and conventions.
 - **Use available tools**: Leverage Claude Code's tools for file reading, searching, and editing to understand the codebase thoroughly.
 - **Test implementations**: When possible, run tests to verify functionality with `pnpm test`.
+
+## 12. ESLint Rules and Guidelines
+
+- **Prefer const over let**: Use `const` for variables that are never reassigned. ESLint will enforce `prefer-const` rule.
+- **React Hooks dependencies**: Always include all dependencies in useEffect and useCallback hooks. Use `useCallback` for functions that are used as dependencies.
+- **Unused imports**: Remove unused imports to keep code clean. Comment out unused imports in development files like Firebase functions if they will be used later.
+- **require() imports**: In configuration files like `tailwind.config.ts`, use `// eslint-disable-line @typescript-eslint/no-require-imports` to allow necessary require() statements.
+- **TypeScript strict rules**: Follow TypeScript strict mode rules including no unused variables and proper type annotations.
