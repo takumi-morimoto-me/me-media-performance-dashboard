@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSpreadsheet, SpreadsheetData } from "@/hooks/use-spreadsheet";
 import { EditableCell } from "./editable-cell";
 import { CSVImportDialog } from "./csv-import-dialog";
+import { formatCellValue, parseNumberInput } from "@/lib/utils";
 import {
   getMedia,
   MediaConfig
@@ -88,11 +89,14 @@ export function HierarchicalSpreadsheetGrid({
     const itemId = actualItems[row].id;
     const colKey = columns[col];
 
+    // カンマを除去して数値に変換
+    const numericValue = parseNumberInput(value);
+
     const newData = {
       ...gridData,
       [itemId]: {
         ...gridData[itemId],
-        [colKey]: parseFloat(value) || 0
+        [colKey]: numericValue
       }
     };
 
@@ -116,13 +120,14 @@ export function HierarchicalSpreadsheetGrid({
         newData[itemId] = {};
       }
 
-      newData[itemId][colKey] = parseFloat(value) || 0;
+      // カンマを除去して数値に変換
+      newData[itemId][colKey] = parseNumberInput(value);
     });
 
     handleDataChange(newData);
   }, [gridData, handleDataChange, flatAccountItems, columns, isDailyView]);
 
-  // セルの実際の値を取得する関数
+  // セルの実際の値を取得する関数（編集用 - フォーマットなし）
   const getCellValue = useCallback((row: number, col: number): string => {
     const actualItems = flatAccountItems.filter(item => !item.isCategory);
     if (row >= actualItems.length || col >= columns.length) {
@@ -143,6 +148,12 @@ export function HierarchicalSpreadsheetGrid({
       return String(value);
     }
   }, [flatAccountItems, columns, gridData, isDailyView, selectedMonth, daysInSelectedMonth]);
+
+  // セルの表示用フォーマット値を取得する関数
+  const getFormattedCellValue = useCallback((row: number, col: number): string => {
+    const rawValue = getCellValue(row, col);
+    return formatCellValue(rawValue, isDailyView);
+  }, [getCellValue, isDailyView]);
 
   const actualItems = flatAccountItems.filter(item => !item.isCategory);
 
@@ -397,6 +408,7 @@ export function HierarchicalSpreadsheetGrid({
                         <EditableCell
                           key={col}
                           value={getCellValue(actualRowIndex, colIndex)}
+                          formattedValue={getFormattedCellValue(actualRowIndex, colIndex)}
                           isSelected={selectedCell?.row === actualRowIndex && selectedCell?.col === colIndex}
                           isEditing={editingCell?.row === actualRowIndex && editingCell?.col === colIndex}
                           editValue={editValue}

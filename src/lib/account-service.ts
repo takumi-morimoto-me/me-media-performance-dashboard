@@ -31,7 +31,13 @@ const LEGACY_COLLECTIONS = [
   'budgetItems', // 旧予算項目コレクション
   'accountStructure', // 旧勘定科目構造
   'media_items', // 旧メディア項目
-  'account_templates' // 旧テンプレート
+  'account_templates', // 旧テンプレート
+  'items', // 旧アイテムコレクション
+  'mediaConfigs', // 旧メディア設定（現在は medias を使用）
+  'budget_items', // 旧予算項目（アンダースコア形式）
+  'account_items', // 旧勘定項目（現在は accountItems を使用）
+  'user_settings', // 旧ユーザー設定
+  'app_settings' // 旧アプリ設定
 ];
 
 // --- Helper Functions ---
@@ -470,7 +476,56 @@ export async function initializeDefaultAccountStructure(): Promise<void> {
 
 // --- Cleanup Functions ---
 
-// 旧コレクションの存在確認
+// 現在使用中のコレクション一覧
+const CURRENT_COLLECTIONS = [
+  ACCOUNT_CATEGORIES_COLLECTION, // accountCategories
+  ACCOUNT_ITEMS_COLLECTION, // accountItems
+  'medias', // メディア管理
+  'users', // ユーザー管理
+];
+
+// 現在のコレクション状況を確認
+export async function checkCurrentCollections(): Promise<{
+  current: Array<{name: string, count: number}>,
+  legacy: Array<{name: string, count: number}>
+}> {
+  const current: Array<{name: string, count: number}> = [];
+  const legacy: Array<{name: string, count: number}> = [];
+
+  // 現在使用中のコレクションをチェック
+  for (const collectionName of CURRENT_COLLECTIONS) {
+    try {
+      const q = query(collection(db, collectionName));
+      const querySnapshot = await getDocs(q);
+      current.push({
+        name: collectionName,
+        count: querySnapshot.size
+      });
+    } catch (error) {
+      console.log(`Current collection ${collectionName} check failed:`, error);
+    }
+  }
+
+  // レガシーコレクションをチェック
+  for (const collectionName of LEGACY_COLLECTIONS) {
+    try {
+      const q = query(collection(db, collectionName));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        legacy.push({
+          name: collectionName,
+          count: querySnapshot.size
+        });
+      }
+    } catch (error) {
+      console.log(`Legacy collection ${collectionName} does not exist`);
+    }
+  }
+
+  return { current, legacy };
+}
+
+// 旧コレクションの存在確認（後方互換性のため残す）
 export async function checkLegacyCollections(): Promise<string[]> {
   const existingCollections: string[] = [];
 

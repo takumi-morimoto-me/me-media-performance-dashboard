@@ -10,14 +10,20 @@ import {
 } from '@/lib/media-service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 import { 
   Card, 
   CardContent, 
@@ -46,7 +52,7 @@ import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AccountItemManager } from '@/components/settings/account-item-manager';
 import {
-  checkLegacyCollections,
+  checkCurrentCollections,
   cleanupLegacyCollections
 } from '@/lib/account-service';
 
@@ -66,7 +72,15 @@ export default function SettingsPage() {
   // For Cleanup
   const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
   const [legacyCollections, setLegacyCollections] = useState<string[]>([]);
+  const [collectionStatus, setCollectionStatus] = useState<{
+    current: Array<{name: string, count: number}>,
+    legacy: Array<{name: string, count: number}>
+  } | null>(null);
   const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+
+  // Tab management
+  const [activeTab, setActiveTab] = useState('basic');
 
   const handleAddMedia = async (e: FormEvent) => {
     e.preventDefault();
@@ -129,12 +143,21 @@ export default function SettingsPage() {
 
   // Legacy collection cleanup
   const checkAndShowCleanupDialog = async () => {
+    setIsChecking(true);
     try {
-      const collections = await checkLegacyCollections();
-      setLegacyCollections(collections);
+      // 詳細なコレクション状況を確認
+      const status = await checkCurrentCollections();
+      setCollectionStatus(status);
 
-      if (collections.length === 0) {
+      // 後方互換性のためのlegacyCollections設定
+      const legacyNames = status.legacy.map(l => l.name);
+      setLegacyCollections(legacyNames);
+
+      if (status.legacy.length === 0) {
         toast.success('不要なコレクションは見つかりませんでした');
+
+        // 現在のコレクション状況をコンソールに表示
+        console.log('現在のコレクション状況:', status.current);
         return;
       }
 
@@ -142,6 +165,8 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error checking legacy collections:', error);
       toast.error('コレクションの確認中にエラーが発生しました');
+    } finally {
+      setIsChecking(false);
     }
   };
 
@@ -162,30 +187,58 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* 勘定項目設定 */}
-      <AccountItemManager />
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold">設定</h1>
+        <p className="text-muted-foreground">
+          アプリケーションの各種設定を管理します。
+        </p>
+      </div>
 
-      {/* データベースクリーンアップ */}
-      <Card>
-        <CardHeader>
-          <CardTitle>データベースクリーンアップ</CardTitle>
-          <CardDescription>
-            古いコレクションや不要なデータを削除します。システムが重くなった場合に実行してください。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button
-            variant="outline"
-            onClick={checkAndShowCleanupDialog}
-            className="bg-yellow-50 border-yellow-200 hover:bg-yellow-100 text-yellow-800"
-          >
-            不要なデータを確認・削除
-          </Button>
-        </CardContent>
-      </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="basic">基本設定</TabsTrigger>
+          <TabsTrigger value="master-data">マスターデータ</TabsTrigger>
+          <TabsTrigger value="system">システム管理</TabsTrigger>
+        </TabsList>
 
-      {/* メディア設定 */}
-      <Card>
+        {/* 基本設定タブ */}
+        <TabsContent value="basic" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>会計期間設定</CardTitle>
+              <CardDescription>
+                会計年度の開始月や期数を設定します。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                ※ 会計期間設定機能は準備中です
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>ユーザー管理</CardTitle>
+              <CardDescription>
+                システムにアクセスできるユーザーと権限を管理します。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                ※ ユーザー管理機能は準備中です
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* マスターデータタブ */}
+        <TabsContent value="master-data" className="space-y-6">
+          {/* 勘定項目設定 */}
+          <AccountItemManager />
+
+          {/* メディア設定 */}
+          <Card>
         <CardHeader>
           <CardTitle>メディア設定</CardTitle>
           <CardDescription>新しいメディアの追加や、既存メディアの管理を行います。</CardDescription>
@@ -241,7 +294,106 @@ export default function SettingsPage() {
             </Table>
           </div>
         </CardContent>
-      </Card>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>ASP管理</CardTitle>
+              <CardDescription>
+                データ連携対象のASPを管理します。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                ※ ASP管理機能は準備中です
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* システム管理タブ */}
+        <TabsContent value="system" className="space-y-6">
+          {/* データベースクリーンアップ */}
+          <Card>
+            <CardHeader>
+              <CardTitle>データベースクリーンアップ</CardTitle>
+              <CardDescription>
+                古いコレクションや不要なデータを削除します。システムが重くなった場合に実行してください。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <Button
+                  variant="outline"
+                  onClick={checkAndShowCleanupDialog}
+                  disabled={isChecking}
+                  className="bg-yellow-50 border-yellow-200 hover:bg-yellow-100 text-yellow-800"
+                >
+                  {isChecking ? 'チェック中...' : '不要なデータを確認・削除'}
+                </Button>
+
+                {collectionStatus && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-sm font-medium mb-2">コレクション状況</h4>
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <strong>現在使用中:</strong>
+                        <ul className="ml-4 mt-1">
+                          {collectionStatus.current.map(col => (
+                            <li key={col.name} className="text-green-700">
+                              {col.name}: {col.count}件
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {collectionStatus.legacy.length > 0 && (
+                        <div>
+                          <strong className="text-red-600">不要なコレクション:</strong>
+                          <ul className="ml-4 mt-1">
+                            {collectionStatus.legacy.map(col => (
+                              <li key={col.name} className="text-red-600">
+                                {col.name}: {col.count}件
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>MCPステータス監視</CardTitle>
+              <CardDescription>
+                実績データ自動収集の実行状況を確認します。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                ※ MCP監視機能は準備中です
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>通知設定</CardTitle>
+              <CardDescription>
+                エラー発生時やシステム更新時の通知設定を管理します。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                ※ 通知設定機能は準備中です
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -290,7 +442,11 @@ export default function SettingsPage() {
               <br />
               <strong>削除対象:</strong>
               <ul className="list-disc ml-4 mt-2">
-                {legacyCollections.map(collection => (
+                {collectionStatus?.legacy.map(col => (
+                  <li key={col.name} className="text-red-600">
+                    <strong>{col.name}</strong> ({col.count}件のドキュメント)
+                  </li>
+                )) || legacyCollections.map(collection => (
                   <li key={collection}>{collection}</li>
                 ))}
               </ul>

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 
 interface EditableCellProps {
   value: string | number;
+  formattedValue?: string; // 表示用のフォーマットされた値
   isSelected: boolean;
   isEditing: boolean;
   editValue: string;
@@ -21,6 +22,7 @@ interface EditableCellProps {
 export const EditableCell = forwardRef<HTMLInputElement, EditableCellProps>(
   ({
     value,
+    formattedValue,
     isSelected,
     isEditing,
     editValue,
@@ -73,7 +75,7 @@ export const EditableCell = forwardRef<HTMLInputElement, EditableCellProps>(
         tabIndex={0}
       >
         <div className="min-h-[20px] overflow-hidden text-ellipsis">
-          {children || (typeof value === 'number' ? value.toLocaleString() : value)}
+          {children || formattedValue || (typeof value === 'number' ? value.toLocaleString() : value)}
         </div>
         {isSelected && (
           <div className="absolute inset-0 pointer-events-none">
