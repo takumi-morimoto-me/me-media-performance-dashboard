@@ -5,6 +5,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Header } from "@/components/layout/header";
 import { Toaster } from "@/components/ui/sonner";
+import { MediaProvider } from "@/contexts/media-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,13 +33,15 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SidebarProvider>
-          <div className="flex min-h-screen w-full overflow-hidden">
-            <AppSidebar />
-            <div className="flex flex-1 flex-col min-w-0">
-              <Header />
-              <main className="flex-1 p-4 sm:p-6 overflow-auto">{children}</main>
+          <MediaProvider>
+            <div className="flex min-h-screen w-full overflow-hidden">
+              <AppSidebar />
+              <div className="flex flex-1 flex-col min-w-0">
+                <Header />
+                <main className="flex-1 p-4 sm:p-6 overflow-auto">{children}</main>
+              </div>
             </div>
-          </div>
+          </MediaProvider>
         </SidebarProvider>
         <Toaster />
       </body>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMedias } from '@/contexts/media-context';
 import {
   Card,
   CardContent,
@@ -16,12 +16,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
-import { 
-  getMedias, 
-  initializeExistingMedias,
-  MediaConfig 
-} from "@/lib/media-service";
 
 interface PageFiltersProps {
   selectedMedia: string;
@@ -44,35 +38,7 @@ export function PageFilters({
   isDailyView,
   setIsDailyView,
 }: PageFiltersProps) {
-  const [medias, setMedias] = useState<MediaConfig[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // メディア一覧を取得
-  const fetchMedias = async () => {
-    try {
-      setIsLoading(true);
-      await initializeExistingMedias();
-      const mediaList = await getMedias();
-      setMedias(mediaList);
-      
-      if (selectedMedia && !mediaList.find(m => m.id === selectedMedia)) {
-        if (mediaList.length > 0) {
-          setSelectedMedia(mediaList[0].id);
-        }
-      } else if (!selectedMedia && mediaList.length > 0) {
-        setSelectedMedia(mediaList[0].id);
-      }
-    } catch (error) {
-      console.error('Error fetching medias:', error);
-      toast.error('メディア一覧の取得に失敗しました。');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchMedias();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const { medias, isLoading } = useMedias();
 
   return (
     <Card>

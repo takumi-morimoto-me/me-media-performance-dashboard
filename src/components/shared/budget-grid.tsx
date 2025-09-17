@@ -1,6 +1,6 @@
 'use client';
 
-import { SpreadsheetGrid } from '@/components/shared/spreadsheet-grid';
+import { HierarchicalSpreadsheetGrid } from '@/components/shared/hierarchical-spreadsheet-grid';
 
 interface BudgetGridProps {
   selectedMedia: string;
@@ -10,5 +10,5 @@ interface BudgetGridProps {
 }
 
 export function BudgetGrid(props: BudgetGridProps) {
-  return <SpreadsheetGrid {...props} />;
+  return <HierarchicalSpreadsheetGrid {...props} />;
 }

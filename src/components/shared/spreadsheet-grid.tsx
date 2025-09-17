@@ -27,10 +27,9 @@ import { EditableCell } from "./editable-cell";
 import { EditableRowHeader } from "./editable-row-header";
 import { 
   getMedia, 
-  addAccountItem, 
-  removeAccountItem, 
+  addAccountItem,
+  removeAccountItem,
   renameAccountItem,
-  initializeExistingMedias,
   MediaConfig 
 } from "@/lib/media-service";
 
@@ -75,8 +74,7 @@ export function SpreadsheetGrid({
     if (!selectedMedia || !selectedYear) return;
 
     try {
-      const docId = `${selectedMedia}_${selectedYear}`;
-      const docRef = doc(db, "budgets", docId);
+      const docRef = doc(db, "medias", selectedMedia, "budgets", String(selectedYear));
       await setDoc(docRef, data);
       toast.success("データが保存されました。");
     } catch (error) {
@@ -241,12 +239,10 @@ export function SpreadsheetGrid({
     }
 
     try {
-      await initializeExistingMedias();
       const media = await getMedia(selectedMedia);
       setMediaConfig(media);
 
-      const docId = `${selectedMedia}_${selectedYear}`;
-      const docRef = doc(db, "budgets", docId);
+      const docRef = doc(db, "medias", selectedMedia, "budgets", String(selectedYear));
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {

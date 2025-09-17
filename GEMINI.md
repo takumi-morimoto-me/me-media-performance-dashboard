@@ -4,6 +4,7 @@ This document outlines the development guidelines and rules for Gemini to follow
 
 ## 1. Core Principles
 
+- **Strictly adhere to the design principles and rules outlined in `docs/デザイン定義書.md`.**
 - **Before starting implementation, always check the relevant documents in the `docs` directory.**
 - **If the plan or specifications change during implementation, update the relevant documents in the `docs` directory.**
 - **Diagrams must be complete**: When creating diagrams (e.g., directory structures), they must be written out completely, showing all relevant files and directories without abbreviation.
