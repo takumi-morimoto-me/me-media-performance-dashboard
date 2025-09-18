@@ -172,7 +172,7 @@ export function CSVImportDialog({
           status = 'mapped';
         } else {
           // 高度な類似度チェック
-          possibleMatches = await suggestAccountItemMapping(categoryName, itemName);
+          possibleMatches = await suggestAccountItemMapping(selectedMedia, categoryName, itemName);
 
           if (possibleMatches.length === 1) {
             accountItemId = possibleMatches[0].id;
@@ -261,7 +261,7 @@ export function CSVImportDialog({
     try {
       if (selectedItems.length === 0) return;
 
-      const { createdItems } = await createAccountItemsFromCSV(selectedItems);
+      const { createdItems } = await createAccountItemsFromCSV(selectedMedia, selectedItems);
 
       // 勘定項目リストの更新を通知
       if (onAccountItemsUpdated) {

@@ -80,3 +80,25 @@ Before merging to `main`, ensure the following checks pass:
 - **Unused imports**: Remove unused imports to keep code clean. Comment out unused imports in development files like Firebase functions if they will be used later.
 - **require() imports**: In configuration files like `tailwind.config.ts`, use `// eslint-disable-line @typescript-eslint/no-require-imports` to allow necessary require() statements.
 - **TypeScript strict rules**: Follow TypeScript strict mode rules including no unused variables and proper type annotations.
+
+## 13. 修正履歴
+
+### 2024-09-18 予算管理画面から項目削除機能を実装
+
+#### 実装内容
+- 予算管理画面のHierarchicalSpreadsheetGridに項目削除機能を追加
+- カテゴリと項目の各行に削除ボタン（ゴミ箱アイコン）を配置
+- 削除確認ダイアログを実装（AlertDialog使用）
+- 削除後の自動データ更新機能
+
+#### 技術的変更
+- `deleteAccountCategory`関数に`mediaId`パラメータを追加（後方互換性維持）
+- Firestoreのインデックスエラーをfirestore.indexes.jsonで解決
+- TypeScript型エラーの修正（DocumentSnapshot型、null checks等）
+- Suspense境界の追加でNext.js prerendering問題を解決
+
+#### UI/UX改善
+- "全体"選択時と日次ビュー時は削除ボタンを非表示
+- 削除処理中の状態表示とボタン無効化
+- 削除完了時のトースト通知
+- カテゴリ削除時は関連項目も同時削除の明示

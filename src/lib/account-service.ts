@@ -2,22 +2,27 @@ import { db } from './firebase';
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   deleteDoc,
   addDoc,
   updateDoc,
+  setDoc,
   query,
   orderBy,
   writeBatch,
-  Timestamp
+  Timestamp,
+  where,
+  DocumentSnapshot,
+  DocumentData
 } from 'firebase/firestore';
 import {
-  AccountCategory,
-  AccountItem,
+  LegacyAccountCategory,
+  LegacyAccountItem,
   CreateAccountCategoryInput,
   UpdateAccountCategoryInput,
-  CreateAccountItemInput,
-  UpdateAccountItemInput,
+  LegacyCreateAccountItemInput,
+  LegacyUpdateAccountItemInput,
   FlatAccountItem,
   DEFAULT_ACCOUNT_STRUCTURE
 } from '@/types/account-items';
@@ -26,39 +31,31 @@ import {
 const ACCOUNT_CATEGORIES_COLLECTION = 'accountCategories';
 const ACCOUNT_ITEMS_COLLECTION = 'accountItems';
 
-// 旧コレクション名（削除対象）
-const LEGACY_COLLECTIONS = [
-  'budgetItems', // 旧予算項目コレクション
-  'accountStructure', // 旧勘定科目構造
-  'media_items', // 旧メディア項目
-  'account_templates', // 旧テンプレート
-  'items', // 旧アイテムコレクション
-  'mediaConfigs', // 旧メディア設定（現在は medias を使用）
-  'budget_items', // 旧予算項目（アンダースコア形式）
-  'account_items', // 旧勘定項目（現在は accountItems を使用）
-  'user_settings', // 旧ユーザー設定
-  'app_settings' // 旧アプリ設定
-];
-
 // --- Helper Functions ---
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const convertCategoryDoc = (doc: any): AccountCategory => {
+const convertCategoryDoc = (doc: DocumentSnapshot<DocumentData>): LegacyAccountCategory => {
   const data = doc.data();
+  if (!data) {
+    throw new Error(`Document ${doc.id} has no data`);
+  }
   return {
     id: doc.id,
+    mediaId: data.mediaId,
     name: data.name,
     order: data.order || 0,
-    items: [], // itemsは別途取得
+    items: [],
     createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(),
     updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(),
   };
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const convertItemDoc = (doc: any): AccountItem => {
+const convertItemDoc = (doc: DocumentSnapshot<DocumentData>): LegacyAccountItem => {
   const data = doc.data();
+  if (!data) {
+    throw new Error(`Document ${doc.id} has no data`);
+  }
   return {
     id: doc.id,
+    mediaId: data.mediaId,
     name: data.name,
     categoryId: data.categoryId,
     order: data.order || 0,
@@ -69,23 +66,26 @@ const convertItemDoc = (doc: any): AccountItem => {
 
 // --- Category Management ---
 
-// カテゴリ一覧を取得
-export async function getAccountCategories(): Promise<AccountCategory[]> {
+export async function getAccountCategories(mediaId: string): Promise<LegacyAccountCategory[]> {
   try {
-    const q = query(collection(db, ACCOUNT_CATEGORIES_COLLECTION), orderBy('order', 'asc'));
-    const querySnapshot = await getDocs(q);
-    const categories = querySnapshot.docs.map(convertCategoryDoc);
+    const catQuery = query(
+      collection(db, ACCOUNT_CATEGORIES_COLLECTION),
+      where('mediaId', '==', mediaId),
+      orderBy('order', 'asc')
+    );
+    const catSnapshot = await getDocs(catQuery);
+    const categories = catSnapshot.docs.map(convertCategoryDoc);
 
-    // 各カテゴリの項目を取得
+    const itemQuery = query(
+      collection(db, ACCOUNT_ITEMS_COLLECTION),
+      where('mediaId', '==', mediaId),
+      orderBy('order', 'asc')
+    );
+    const itemSnapshot = await getDocs(itemQuery);
+    const allItems = itemSnapshot.docs.map(convertItemDoc);
+
     for (const category of categories) {
-      const itemsQ = query(
-        collection(db, ACCOUNT_ITEMS_COLLECTION),
-        orderBy('order', 'asc')
-      );
-      const itemsSnapshot = await getDocs(itemsQ);
-      category.items = itemsSnapshot.docs
-        .map(convertItemDoc)
-        .filter(item => item.categoryId === category.id);
+      category.items = allItems.filter(item => item.categoryId === category.id);
     }
 
     return categories;
@@ -95,13 +95,13 @@ export async function getAccountCategories(): Promise<AccountCategory[]> {
   }
 }
 
-// カテゴリを作成
-export async function createAccountCategory(input: CreateAccountCategoryInput): Promise<string> {
+export async function createAccountCategory(mediaId: string, input: CreateAccountCategoryInput): Promise<string> {
   try {
     const now = new Date();
-    const order = input.order ?? await getNextCategoryOrder();
+    const order = input.order ?? await getNextCategoryOrder(mediaId);
 
     const categoryData = {
+      mediaId,
       name: input.name,
       order,
       createdAt: now,
@@ -116,21 +116,13 @@ export async function createAccountCategory(input: CreateAccountCategoryInput): 
   }
 }
 
-// カテゴリを更新
 export async function updateAccountCategory(categoryId: string, input: UpdateAccountCategoryInput): Promise<void> {
   try {
     const docRef = doc(db, ACCOUNT_CATEGORIES_COLLECTION, categoryId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {
-      updatedAt: new Date(),
-    };
+    const updateData: Record<string, string | number | Date> = { updatedAt: new Date() };
 
-    if (input.name !== undefined) {
-      updateData.name = input.name;
-    }
-    if (input.order !== undefined) {
-      updateData.order = input.order;
-    }
+    if (input.name !== undefined) updateData.name = input.name;
+    if (input.order !== undefined) updateData.order = input.order;
 
     await updateDoc(docRef, updateData);
   } catch (error) {
@@ -139,24 +131,28 @@ export async function updateAccountCategory(categoryId: string, input: UpdateAcc
   }
 }
 
-// カテゴリを削除
-export async function deleteAccountCategory(categoryId: string): Promise<void> {
+export async function deleteAccountCategory(categoryId: string, mediaId?: string): Promise<void> {
   try {
     const batch = writeBatch(db);
-
-    // カテゴリ内の項目を削除
-    const itemsQ = query(collection(db, ACCOUNT_ITEMS_COLLECTION));
-    const itemsSnapshot = await getDocs(itemsQ);
-    const itemsToDelete = itemsSnapshot.docs.filter(doc => doc.data().categoryId === categoryId);
-
-    itemsToDelete.forEach(itemDoc => {
-      batch.delete(itemDoc.ref);
-    });
-
-    // カテゴリを削除
     const categoryRef = doc(db, ACCOUNT_CATEGORIES_COLLECTION, categoryId);
-    batch.delete(categoryRef);
 
+    // mediaIdが提供されていない場合は、ドキュメントから取得を試行
+    if (!mediaId) {
+      const categoryDoc = await getDoc(categoryRef);
+      mediaId = categoryDoc.data()?.mediaId;
+
+      if (!mediaId) throw new Error('Category does not have a mediaId and none was provided.');
+    }
+
+    const itemsQuery = query(
+      collection(db, ACCOUNT_ITEMS_COLLECTION),
+      where('mediaId', '==', mediaId),
+      where('categoryId', '==', categoryId)
+    );
+    const itemsSnapshot = await getDocs(itemsQuery);
+    itemsSnapshot.forEach(doc => batch.delete(doc.ref));
+
+    batch.delete(categoryRef);
     await batch.commit();
   } catch (error) {
     console.error('Error deleting account category:', error);
@@ -166,13 +162,13 @@ export async function deleteAccountCategory(categoryId: string): Promise<void> {
 
 // --- Item Management ---
 
-// 項目を作成
-export async function createAccountItem(input: CreateAccountItemInput): Promise<string> {
+export async function createAccountItem(mediaId: string, input: LegacyCreateAccountItemInput): Promise<string> {
   try {
     const now = new Date();
-    const order = input.order ?? await getNextItemOrder(input.categoryId);
+    const order = input.order ?? await getNextItemOrder(mediaId, input.categoryId);
 
     const itemData = {
+      mediaId,
       name: input.name,
       categoryId: input.categoryId,
       order,
@@ -188,24 +184,14 @@ export async function createAccountItem(input: CreateAccountItemInput): Promise<
   }
 }
 
-// 項目を更新
-export async function updateAccountItem(itemId: string, input: UpdateAccountItemInput): Promise<void> {
+export async function updateAccountItem(itemId: string, input: LegacyUpdateAccountItemInput): Promise<void> {
   try {
     const docRef = doc(db, ACCOUNT_ITEMS_COLLECTION, itemId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {
-      updatedAt: new Date(),
-    };
+    const updateData: Record<string, string | number | Date> = { updatedAt: new Date() };
 
-    if (input.name !== undefined) {
-      updateData.name = input.name;
-    }
-    if (input.categoryId !== undefined) {
-      updateData.categoryId = input.categoryId;
-    }
-    if (input.order !== undefined) {
-      updateData.order = input.order;
-    }
+    if (input.name !== undefined) updateData.name = input.name;
+    if (input.categoryId !== undefined) updateData.categoryId = input.categoryId;
+    if (input.order !== undefined) updateData.order = input.order;
 
     await updateDoc(docRef, updateData);
   } catch (error) {
@@ -214,7 +200,6 @@ export async function updateAccountItem(itemId: string, input: UpdateAccountItem
   }
 }
 
-// 項目を削除
 export async function deleteAccountItem(itemId: string): Promise<void> {
   try {
     const docRef = doc(db, ACCOUNT_ITEMS_COLLECTION, itemId);
@@ -227,241 +212,57 @@ export async function deleteAccountItem(itemId: string): Promise<void> {
 
 // --- Utility Functions ---
 
-// 次のカテゴリ順序を取得
-async function getNextCategoryOrder(): Promise<number> {
-  const categories = await getAccountCategories();
+async function getNextCategoryOrder(mediaId: string): Promise<number> {
+  const categories = await getAccountCategories(mediaId);
   return categories.length > 0 ? Math.max(...categories.map(c => c.order)) + 1 : 1;
 }
 
-// 次の項目順序を取得
-async function getNextItemOrder(categoryId: string): Promise<number> {
-  const q = query(collection(db, ACCOUNT_ITEMS_COLLECTION));
+async function getNextItemOrder(mediaId: string, categoryId: string): Promise<number> {
+  const q = query(
+    collection(db, ACCOUNT_ITEMS_COLLECTION),
+    where('mediaId', '==', mediaId),
+    where('categoryId', '==', categoryId)
+  );
   const querySnapshot = await getDocs(q);
-  const items = querySnapshot.docs
-    .map(convertItemDoc)
-    .filter(item => item.categoryId === categoryId);
-
+  const items = querySnapshot.docs.map(convertItemDoc);
   return items.length > 0 ? Math.max(...items.map(i => i.order)) + 1 : 1;
 }
 
-// スプレッドシート表示用の扁平化されたリストを取得
-export async function getFlatAccountItems(): Promise<FlatAccountItem[]> {
-  const categories = await getAccountCategories();
+export async function getFlatAccountItems(mediaId: string): Promise<FlatAccountItem[]> {
+  const categories = await getAccountCategories(mediaId);
   const flatItems: FlatAccountItem[] = [];
 
   categories.forEach(category => {
-    // カテゴリヘッダーを追加
-    flatItems.push({
-      id: `category-${category.id}`,
-      name: category.name,
-      categoryId: category.id,
-      categoryName: category.name,
-      fullName: category.name,
-      isCategory: true,
-      order: category.order * 1000 // カテゴリを最上位にするため大きな数値
-    });
-
-    // カテゴリ内の項目を追加
+    flatItems.push({ id: `category-${category.id}`, name: category.name, categoryId: category.id, categoryName: category.name, fullName: category.name, isCategory: true, order: category.order * 1000 });
     category.items.forEach(item => {
-      flatItems.push({
-        id: item.id,
-        name: item.name,
-        categoryId: item.categoryId,
-        categoryName: category.name,
-        fullName: `${category.name} > ${item.name}`,
-        isCategory: false,
-        order: category.order * 1000 + item.order
-      });
+      flatItems.push({ id: item.id, name: item.name, categoryId: item.categoryId, categoryName: category.name, fullName: `${category.name} > ${item.name}`, isCategory: false, order: category.order * 1000 + item.order });
     });
   });
 
   return flatItems.sort((a, b) => a.order - b.order);
 }
 
-// CSVインポート時の新項目自動作成
-export async function createAccountItemsFromCSV(
-  newItems: Array<{ categoryName: string; itemName: string }>
-): Promise<{ createdCategories: AccountCategory[]; createdItems: AccountItem[] }> {
+// --- Initialization & Migration ---
+
+export async function initializeDefaultAccountStructure(mediaId: string): Promise<void> {
   try {
-    const batch = writeBatch(db);
-    const createdCategories: AccountCategory[] = [];
-    const createdItems: AccountItem[] = [];
-
-    // 既存のカテゴリを取得
-    const existingCategories = await getAccountCategories();
-    const categoryMap = new Map(existingCategories.map(cat => [cat.name, cat]));
-
-    // 新しいカテゴリとアイテムをグループ化
-    const categoryGroups = new Map<string, string[]>();
-
-    newItems.forEach(({ categoryName, itemName }) => {
-      if (!categoryGroups.has(categoryName)) {
-        categoryGroups.set(categoryName, []);
-      }
-      categoryGroups.get(categoryName)!.push(itemName);
-    });
-
-    // カテゴリとアイテムを作成
-    for (const [categoryName, itemNames] of categoryGroups) {
-      let category = categoryMap.get(categoryName);
-
-      // カテゴリが存在しない場合は作成
-      if (!category) {
-        const categoryRef = doc(collection(db, ACCOUNT_CATEGORIES_COLLECTION));
-        const categoryOrder = await getNextCategoryOrder();
-
-        const categoryData = {
-          name: categoryName,
-          order: categoryOrder,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-
-        batch.set(categoryRef, categoryData);
-
-        category = {
-          id: categoryRef.id,
-          ...categoryData,
-          items: []
-        };
-
-        createdCategories.push(category);
-        categoryMap.set(categoryName, category);
-      }
-
-      // アイテムを作成
-      for (const itemName of itemNames) {
-        // 既存アイテムとの重複チェック
-        const existingItem = category.items.find(item => item.name === itemName);
-        if (!existingItem) {
-          const itemRef = doc(collection(db, ACCOUNT_ITEMS_COLLECTION));
-          const itemOrder = await getNextItemOrder(category.id);
-
-          const itemData = {
-            name: itemName,
-            categoryId: category.id,
-            order: itemOrder,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          };
-
-          batch.set(itemRef, itemData);
-
-          const newItem: AccountItem = {
-            id: itemRef.id,
-            ...itemData
-          };
-
-          createdItems.push(newItem);
-          category.items.push(newItem);
-        }
-      }
-    }
-
-    // バッチでFirestoreに保存
-    await batch.commit();
-
-    console.log(`Created ${createdCategories.length} categories and ${createdItems.length} items`);
-
-    return { createdCategories, createdItems };
-
-  } catch (error) {
-    console.error('Error creating account items from CSV:', error);
-    throw error;
-  }
-}
-
-// 項目名の自動提案（既存項目との類似性チェック）
-export async function suggestAccountItemMapping(
-  csvCategoryName: string,
-  csvItemName: string
-): Promise<FlatAccountItem[]> {
-  try {
-    const flatItems = await getFlatAccountItems();
-    const actualItems = flatItems.filter(item => !item.isCategory);
-
-    // 類似度スコア計算
-    const suggestions = actualItems.map(item => {
-      let score = 0;
-
-      // カテゴリ名の類似度
-      if (item.categoryName.includes(csvCategoryName) || csvCategoryName.includes(item.categoryName)) {
-        score += 3;
-      }
-      if (item.categoryName.toLowerCase() === csvCategoryName.toLowerCase()) {
-        score += 5;
-      }
-
-      // アイテム名の類似度
-      if (item.name.includes(csvItemName) || csvItemName.includes(item.name)) {
-        score += 2;
-      }
-      if (item.name.toLowerCase() === csvItemName.toLowerCase()) {
-        score += 10;
-      }
-
-      // 部分一致の計算
-      const categoryWords = csvCategoryName.split(/[\s　]/);
-      const itemWords = csvItemName.split(/[\s　]/);
-
-      categoryWords.forEach(word => {
-        if (word && item.categoryName.includes(word)) score += 1;
-      });
-
-      itemWords.forEach(word => {
-        if (word && item.name.includes(word)) score += 1;
-      });
-
-      return { item, score };
-    });
-
-    // スコア順でソートし、上位5件を返す
-    return suggestions
-      .filter(s => s.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .map(s => s.item);
-
-  } catch (error) {
-    console.error('Error suggesting account item mapping:', error);
-    return [];
-  }
-}
-
-// デフォルトの勘定項目構造を初期化
-export async function initializeDefaultAccountStructure(): Promise<void> {
-  try {
-    // 既存のデータがあるかチェック
-    const existingCategories = await getAccountCategories();
+    const existingCategories = await getAccountCategories(mediaId);
     if (existingCategories.length > 0) {
-      console.log('Account structure already initialized');
+      console.log(`Account structure for media ${mediaId} already initialized`);
       return;
     }
 
-    console.log('Initializing default account structure...');
+    console.log(`Initializing default account structure for media ${mediaId}...`);
     const batch = writeBatch(db);
 
-    // カテゴリを作成
     for (const categoryTemplate of DEFAULT_ACCOUNT_STRUCTURE) {
       const categoryRef = doc(collection(db, ACCOUNT_CATEGORIES_COLLECTION));
-      const categoryData = {
-        name: categoryTemplate.name,
-        order: categoryTemplate.order,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      const categoryData = { mediaId, name: categoryTemplate.name, order: categoryTemplate.order, createdAt: new Date(), updatedAt: new Date() };
       batch.set(categoryRef, categoryData);
 
-      // カテゴリ内の項目を作成
       for (const itemTemplate of categoryTemplate.items) {
         const itemRef = doc(collection(db, ACCOUNT_ITEMS_COLLECTION));
-        const itemData = {
-          name: itemTemplate.name,
-          categoryId: categoryRef.id,
-          order: itemTemplate.order,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
+        const itemData = { mediaId, name: itemTemplate.name, categoryId: categoryRef.id, order: itemTemplate.order, createdAt: new Date(), updatedAt: new Date() };
         batch.set(itemRef, itemData);
       }
     }
@@ -474,7 +275,73 @@ export async function initializeDefaultAccountStructure(): Promise<void> {
   }
 }
 
+export async function migrateAccountItemsToMediaId(): Promise<boolean> {
+  const migrationDocRef = doc(db, 'migrations', 'v2-account-items-media-id');
+  const migrationDocSnap = await getDoc(migrationDocRef);
+
+  if (migrationDocSnap.exists()) {
+    return false; // Migration already done
+  }
+
+  console.log('Starting migration v2: Adding mediaId to account items...');
+
+  try {
+    // 1. Find the 'all' media document to get its unique ID
+    const mediaQuery = query(collection(db, 'medias'), where('slug', '==', 'all'));
+    const mediaSnapshot = await getDocs(mediaQuery);
+    if (mediaSnapshot.empty) {
+      console.warn('Migration v2 skipped: Could not find media with slug "all".');
+      // Mark as complete to avoid re-running
+      await setDoc(migrationDocRef, { completedAt: new Date(), status: 'skipped' });
+      return false;
+    }
+    const allMediaId = mediaSnapshot.docs[0].id;
+
+    const batch = writeBatch(db);
+
+    // 2. Update all categories without a mediaId
+    const catQuery = query(collection(db, ACCOUNT_CATEGORIES_COLLECTION), where('mediaId', '==', null));
+    const catSnapshot = await getDocs(catQuery);
+    catSnapshot.forEach(doc => {
+      batch.update(doc.ref, { mediaId: allMediaId });
+    });
+
+    // 3. Update all items without a mediaId
+    const itemQuery = query(collection(db, ACCOUNT_ITEMS_COLLECTION), where('mediaId', '==', null));
+    const itemSnapshot = await getDocs(itemQuery);
+    itemSnapshot.forEach(doc => {
+      batch.update(doc.ref, { mediaId: allMediaId });
+    });
+
+    await batch.commit();
+
+    // 4. Mark migration as complete
+    await setDoc(migrationDocRef, { completedAt: new Date(), status: 'completed' });
+
+    console.log(`Migration v2 completed: ${catSnapshot.size} categories and ${itemSnapshot.size} items updated.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error during data migration v2:', error);
+    throw error;
+  }
+}
+
 // --- Cleanup Functions ---
+
+// 旧コレクション名（削除対象）
+const LEGACY_COLLECTIONS = [
+  'budgetItems', // 旧予算項目コレクション
+  'accountStructure', // 旧勘定科目構造
+  'media_items', // 旧メディア項目
+  'account_templates', // 旧テンプレート
+  'items', // 旧アイテムコレクション
+  'mediaConfigs', // 旧メディア設定（現在は medias を使用）
+  'budget_items', // 旧予算項目（アンダースコア形式）
+  'account_items', // 旧勘定項目（現在は accountItems を使用）
+  'user_settings', // 旧ユーザー設定
+  'app_settings' // 旧アプリ設定
+];
 
 // 現在使用中のコレクション一覧
 const CURRENT_COLLECTIONS = [
@@ -525,43 +392,23 @@ export async function checkCurrentCollections(): Promise<{
   return { current, legacy };
 }
 
-// 旧コレクションの存在確認（後方互換性のため残す）
-export async function checkLegacyCollections(): Promise<string[]> {
-  const existingCollections: string[] = [];
-
-  for (const collectionName of LEGACY_COLLECTIONS) {
-    try {
-      const q = query(collection(db, collectionName));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        existingCollections.push(collectionName);
-      }
-    } catch (error) {
-      // コレクションが存在しない場合はエラーが発生する可能性がある
-      console.log(`Collection ${collectionName} does not exist or is empty`);
-    }
-  }
-
-  return existingCollections;
-}
-
 // 旧コレクションの削除（管理者用）
 export async function cleanupLegacyCollections(): Promise<void> {
   try {
-    const existingCollections = await checkLegacyCollections();
+    const { legacy } = await checkCurrentCollections();
 
-    if (existingCollections.length === 0) {
+    if (legacy.length === 0) {
       console.log('No legacy collections found to cleanup');
       return;
     }
 
-    console.log(`Found legacy collections to cleanup: ${existingCollections.join(', ')}`);
+    console.log(`Found legacy collections to cleanup: ${legacy.map(l => l.name).join(', ')}`);
 
     const batch = writeBatch(db);
     let batchOperations = 0;
 
-    for (const collectionName of existingCollections) {
-      const q = query(collection(db, collectionName));
+    for (const legacyCollection of legacy) {
+      const q = query(collection(db, legacyCollection.name));
       const querySnapshot = await getDocs(q);
 
       querySnapshot.docs.forEach(docRef => {
@@ -583,5 +430,125 @@ export async function cleanupLegacyCollections(): Promise<void> {
   } catch (error) {
     console.error('Error cleaning up legacy collections:', error);
     throw error;
+  }
+}
+
+// CSVインポート用の関数
+export async function createAccountItemsFromCSV(
+  mediaId: string,
+  newItems: Array<{ categoryName: string; itemName: string }>
+): Promise<{ createdCategories: LegacyAccountCategory[]; createdItems: LegacyAccountItem[] }> {
+  try {
+    const batch = writeBatch(db);
+    const createdCategories: LegacyAccountCategory[] = [];
+    const createdItems: LegacyAccountItem[] = [];
+
+    // 既存のカテゴリを取得
+    const existingCategories = await getAccountCategories(mediaId);
+    const categoryMap = new Map(existingCategories.map(cat => [cat.name, cat]));
+
+    // 新しいカテゴリとアイテムをグループ化
+    const categoryGroups = new Map<string, string[]>();
+    newItems.forEach(({ categoryName, itemName }) => {
+      if (!categoryGroups.has(categoryName)) {
+        categoryGroups.set(categoryName, []);
+      }
+      categoryGroups.get(categoryName)!.push(itemName);
+    });
+
+    // カテゴリとアイテムを作成
+    for (const [categoryName, itemNames] of categoryGroups) {
+      let category = categoryMap.get(categoryName);
+
+      // カテゴリが存在しない場合は作成
+      if (!category) {
+        const categoryRef = doc(collection(db, ACCOUNT_CATEGORIES_COLLECTION));
+        const categoryOrder = await getNextCategoryOrder(mediaId);
+        const categoryData = {
+          mediaId,
+          name: categoryName,
+          order: categoryOrder,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        batch.set(categoryRef, categoryData);
+
+        category = {
+          id: categoryRef.id,
+          ...categoryData,
+          items: []
+        };
+        createdCategories.push(category);
+        categoryMap.set(categoryName, category);
+      }
+
+      // アイテムを作成
+      for (const itemName of itemNames) {
+        // 既存アイテムとの重複チェック
+        const existingItem = category.items.find(item => item.name === itemName);
+        if (!existingItem) {
+          const itemRef = doc(collection(db, ACCOUNT_ITEMS_COLLECTION));
+          const itemOrder = await getNextItemOrder(mediaId, category.id);
+          const itemData = {
+            mediaId,
+            name: itemName,
+            categoryId: category.id,
+            order: itemOrder,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          batch.set(itemRef, itemData);
+
+          const newItem: LegacyAccountItem = {
+            id: itemRef.id,
+            ...itemData
+          };
+          createdItems.push(newItem);
+          category.items.push(newItem);
+        }
+      }
+    }
+
+    // バッチでFirestoreに保存
+    await batch.commit();
+    console.log(`Created ${createdCategories.length} categories and ${createdItems.length} items`);
+    return { createdCategories, createdItems };
+
+  } catch (error) {
+    console.error('Error creating account items from CSV:', error);
+    throw error;
+  }
+}
+
+// アカウント項目のマッピング提案（類似度チェック）
+export async function suggestAccountItemMapping(
+  mediaId: string,
+  categoryName: string,
+  itemName: string
+): Promise<FlatAccountItem[]> {
+  try {
+    const flatItems = await getFlatAccountItems(mediaId);
+    const actualItems = flatItems.filter(item => !item.isCategory);
+
+    // 簡単な類似度チェック
+    const suggestions = actualItems.filter(item => {
+      const nameMatch = item.name.includes(itemName) || itemName.includes(item.name);
+      const categoryMatch = item.categoryName.includes(categoryName) || categoryName.includes(item.categoryName);
+      return nameMatch || categoryMatch;
+    });
+
+    // 類似度順でソート（完全一致 > 部分一致）
+    return suggestions.sort((a, b) => {
+      const aExactName = a.name === itemName ? 1 : 0;
+      const bExactName = b.name === itemName ? 1 : 0;
+      const aExactCategory = a.categoryName === categoryName ? 1 : 0;
+      const bExactCategory = b.categoryName === categoryName ? 1 : 0;
+
+      return (bExactName + bExactCategory) - (aExactName + aExactCategory);
+    });
+
+  } catch (error) {
+    console.error('Error suggesting account item mapping:', error);
+    return [];
   }
 }

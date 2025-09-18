@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMedias } from '@/contexts/media-context';
 import { 
   createMedia, 
@@ -18,12 +19,6 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
 import { 
   Card, 
   CardContent, 
@@ -51,13 +46,22 @@ import {
 import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AccountItemManager } from '@/components/settings/account-item-manager';
+import { FirebaseCleanup } from '@/components/admin/firebase-cleanup';
 import {
   checkCurrentCollections,
   cleanupLegacyCollections
 } from '@/lib/account-service';
 
-export default function SettingsPage() {
+const VALID_TABS = ['overall', 'detailed', 'system'];
+
+function SettingsPageContent() {
+  const searchParams = useSearchParams();
   const { medias, isLoading, refetchMedias } = useMedias();
+
+  const activeTab = VALID_TABS.includes(searchParams.get('tab') || '') 
+    ? searchParams.get('tab')! 
+    : 'overall';
+
   const [newMediaName, setNewMediaName] = useState('');
 
   // For Edit Dialog
@@ -78,9 +82,6 @@ export default function SettingsPage() {
   } | null>(null);
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
-
-  // Tab management
-  const [activeTab, setActiveTab] = useState('basic');
 
   const handleAddMedia = async (e: FormEvent) => {
     e.preventDefault();
@@ -145,18 +146,13 @@ export default function SettingsPage() {
   const checkAndShowCleanupDialog = async () => {
     setIsChecking(true);
     try {
-      // 詳細なコレクション状況を確認
       const status = await checkCurrentCollections();
       setCollectionStatus(status);
-
-      // 後方互換性のためのlegacyCollections設定
       const legacyNames = status.legacy.map(l => l.name);
       setLegacyCollections(legacyNames);
 
       if (status.legacy.length === 0) {
         toast.success('不要なコレクションは見つかりませんでした');
-
-        // 現在のコレクション状況をコンソールに表示
         console.log('現在のコレクション状況:', status.current);
         return;
       }
@@ -187,22 +183,68 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold">設定</h1>
-        <p className="text-muted-foreground">
-          アプリケーションの各種設定を管理します。
-        </p>
-      </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="basic">基本設定</TabsTrigger>
-          <TabsTrigger value="master-data">マスターデータ</TabsTrigger>
-          <TabsTrigger value="system">システム管理</TabsTrigger>
-        </TabsList>
+      {activeTab === 'overall' && (
+        <div className="space-y-6">
+          {/* メディア設定 */}
+          <Card>
+            <CardHeader>
+              <CardTitle>メディア設定</CardTitle>
+              <CardDescription>新しいメディアの追加や、既存メディアの管理を行います。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleAddMedia} className="flex items-center gap-2 mb-6">
+                <Input
+                  placeholder="新しいメディア名" 
+                  value={newMediaName}
+                  onChange={(e) => setNewMediaName(e.target.value)}
+                  className="max-w-xs"
+                />
+                <Button type="submit">メディアを追加</Button>
+              </form>
 
-        {/* 基本設定タブ */}
-        <TabsContent value="basic" className="space-y-6">
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>メディア名</TableHead>
+                      <TableHead className="w-[120px] text-right">アクション</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={2}>
+                          <Skeleton className="h-8 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ) : medias.length > 0 ? (
+                      medias.map((media) => (
+                        <TableRow key={media.id}>
+                          <TableCell className="font-medium">{media.name}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" onClick={() => openEditDialog(media)} className="mr-2">
+                              編集
+                            </Button>
+                            <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(media)}>
+                              削除
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={2} className="text-center">
+                          メディアが登録されていません。
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>会計期間設定</CardTitle>
@@ -230,71 +272,13 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* マスターデータタブ */}
-        <TabsContent value="master-data" className="space-y-6">
+      {activeTab === 'detailed' && (
+        <div className="space-y-6">
           {/* 勘定項目設定 */}
           <AccountItemManager />
-
-          {/* メディア設定 */}
-          <Card>
-        <CardHeader>
-          <CardTitle>メディア設定</CardTitle>
-          <CardDescription>新しいメディアの追加や、既存メディアの管理を行います。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleAddMedia} className="flex items-center gap-2 mb-6">
-            <Input
-              placeholder="新しいメディア名" 
-              value={newMediaName}
-              onChange={(e) => setNewMediaName(e.target.value)}
-              className="max-w-xs"
-            />
-            <Button type="submit">メディアを追加</Button>
-          </form>
-
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>メディア名</TableHead>
-                  <TableHead className="w-[120px] text-right">アクション</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={2}>
-                      <Skeleton className="h-8 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ) : medias.length > 0 ? (
-                  medias.map((media) => (
-                    <TableRow key={media.id}>
-                      <TableCell className="font-medium">{media.name}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="outline" size="sm" onClick={() => openEditDialog(media)} className="mr-2">
-                          編集
-                        </Button>
-                        <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(media)}>
-                          削除
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={2} className="text-center">
-                      メディアが登録されていません。
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-          </Card>
 
           <Card>
             <CardHeader>
@@ -309,10 +293,14 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* システム管理タブ */}
-        <TabsContent value="system" className="space-y-6">
+      {activeTab === 'system' && (
+        <div className="space-y-6">
+          {/* Firebase データクリーンアップ */}
+          <FirebaseCleanup />
+
           {/* データベースクリーンアップ */}
           <Card>
             <CardHeader>
@@ -353,7 +341,7 @@ export default function SettingsPage() {
                             {collectionStatus.legacy.map(col => (
                               <li key={col.name} className="text-red-600">
                                 {col.name}: {col.count}件
-                              </li>
+                            </li>
                             ))}
                           </ul>
                         </div>
@@ -392,8 +380,8 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -469,5 +457,13 @@ export default function SettingsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SettingsPageContent />
+    </Suspense>
   );
 }

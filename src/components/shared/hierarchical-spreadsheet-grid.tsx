@@ -9,6 +9,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Table,
   TableBody,
   TableHead,
@@ -19,7 +29,7 @@ import { toast } from "sonner";
 import Papa from "papaparse";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { Upload } from "lucide-react";
+import { Upload, Trash2 } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSpreadsheet, SpreadsheetData } from "@/hooks/use-spreadsheet";
@@ -32,8 +42,11 @@ import {
 } from "@/lib/media-service";
 import {
   getFlatAccountItems,
-  initializeDefaultAccountStructure
-} from "@/lib/account-service";
+  deleteAccountItem,
+  initializeDefaultAccountItems,
+  checkMigrationStatus,
+  migrateFromLegacyStructure
+} from "@/lib/accounts-service";
 import { FlatAccountItem } from "@/types/account-items";
 
 interface HierarchicalSpreadsheetGridProps {
@@ -64,6 +77,11 @@ export function HierarchicalSpreadsheetGrid({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+
+  // 削除機能用の状態
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'category' | 'item'; item: FlatAccountItem } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const daysInSelectedMonth = getDaysInMonth(selectedYear, selectedMonth);
 
@@ -189,11 +207,18 @@ export function HierarchicalSpreadsheetGrid({
       return;
     }
 
+    // "all" の場合は全体用の処理をスキップ
+    if (selectedMedia === "all") {
+      setIsLoading(false);
+      setError("全体表示は現在対応していません。具体的なメディアを選択してください。");
+      return;
+    }
+
     try {
       const media = await getMedia(selectedMedia);
       setMediaConfig(media);
 
-      const docRef = doc(db, "medias", selectedMedia, "budgets", String(selectedYear));
+      const docRef = doc(db, "budgets", `${selectedMedia}-${selectedYear}`);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
@@ -201,7 +226,7 @@ export function HierarchicalSpreadsheetGrid({
       } else {
         // 新しいメディア/年度の場合、空のデータで初期化
         const initialData: SpreadsheetData = {};
-        const items = await getFlatAccountItems();
+        const items = await getFlatAccountItems(selectedMedia);
         items.filter(item => !item.isCategory).forEach(item => {
           initialData[item.id] = Object.fromEntries(months.map(month => [month, 0]));
         });
@@ -217,21 +242,29 @@ export function HierarchicalSpreadsheetGrid({
 
   // 勘定項目データ読み込み
   const loadAccountItems = useCallback(async () => {
+    if (!selectedMedia) return;
+
+    // "all" の場合は勘定項目を空にする
+    if (selectedMedia === "all") {
+      setFlatAccountItems([]);
+      return;
+    }
+
     try {
-      const items = await getFlatAccountItems();
-      if (items.length === 0) {
-        // デフォルトの勘定項目を初期化
-        await initializeDefaultAccountStructure();
-        const newItems = await getFlatAccountItems();
-        setFlatAccountItems(newItems);
-      } else {
-        setFlatAccountItems(items);
+      // 移行状況をチェック
+      const isMigrated = await checkMigrationStatus();
+      if (!isMigrated) {
+        console.log('Migration not completed, running migration...');
+        await migrateFromLegacyStructure();
       }
+
+      const items = await getFlatAccountItems(selectedMedia);
+      setFlatAccountItems(items);
     } catch (error) {
       console.error("Error loading account items:", error);
       toast.error("勘定項目の読み込みに失敗しました");
     }
-  }, []);
+  }, [selectedMedia]);
 
   useEffect(() => {
     loadAccountItems();
@@ -248,7 +281,7 @@ export function HierarchicalSpreadsheetGrid({
     if (!selectedMedia || !selectedYear) return;
 
     try {
-      const docRef = doc(db, "medias", selectedMedia, "budgets", String(selectedYear));
+      const docRef = doc(db, "budgets", `${selectedMedia}-${selectedYear}`);
       await setDoc(docRef, gridData);
       toast.success("データを保存しました");
     } catch (error) {
@@ -291,7 +324,7 @@ export function HierarchicalSpreadsheetGrid({
       setGridData(mergedData);
 
       // Firestoreに保存
-      const docRef = doc(db, "medias", selectedMedia, "budgets", String(selectedYear));
+      const docRef = doc(db, "budgets", `${selectedMedia}-${selectedYear}`);
       await setDoc(docRef, mergedData);
 
       // データを再読み込みして最新状態を確保
@@ -302,6 +335,63 @@ export function HierarchicalSpreadsheetGrid({
       console.error("Error importing CSV data:", error);
       toast.error("CSVインポート中にエラーが発生しました");
       throw error;
+    }
+  };
+
+  // 削除機能
+  const handleDeleteClick = (item: FlatAccountItem) => {
+    const type = item.isCategory ? 'category' : 'item';
+    setDeleteTarget({ type, item });
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+
+    console.log('Delete target:', deleteTarget);
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.type === 'category') {
+        // カテゴリ削除の場合、そのカテゴリに属する全てのアイテムも削除される
+        // カテゴリIDから接頭辞を除去（category-xxxの場合）
+        const actualCategoryId = deleteTarget.item.id.startsWith('category-')
+          ? deleteTarget.item.id.replace('category-', '')
+          : deleteTarget.item.id;
+        console.log('Original category ID:', deleteTarget.item.id, 'Actual category ID:', actualCategoryId);
+
+        // 新構造ではカテゴリ削除は単一アイテムの削除
+        await deleteAccountItem(actualCategoryId);
+
+        // 同じカテゴリの他のアイテムも削除
+        const allItems = await getFlatAccountItems(selectedMedia);
+        const categoryItems = allItems.filter(item =>
+          !item.isCategory && item.categoryName === deleteTarget.item.name
+        );
+
+        for (const item of categoryItems) {
+          await deleteAccountItem(item.id);
+        }
+
+        toast.success('カテゴリと関連項目を削除しました');
+      } else {
+        // アイテム削除
+        await deleteAccountItem(deleteTarget.item.id);
+        toast.success('項目を削除しました');
+      }
+
+      // 勘定項目を再読み込み
+      await loadAccountItems();
+
+      // 予算データも再読み込み（削除されたアイテムの関連データを除去）
+      await fetchBudgetData();
+
+      setIsDeleteDialogOpen(false);
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast.error('削除に失敗しました');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -384,7 +474,19 @@ export function HierarchicalSpreadsheetGrid({
                   return (
                     <TableRow key={item.id} className="bg-muted/50">
                       <td className="sticky left-0 bg-muted/50 z-10 font-semibold p-3">
-                        {item.name}
+                        <div className="flex items-center justify-between">
+                          <span>{item.name}</span>
+                          {selectedMedia !== "all" && !isDailyView && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteClick(item)}
+                              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
                       </td>
                       {columns.map((col) => (
                         <td key={col} className="p-3 text-center text-muted-foreground">
@@ -400,8 +502,18 @@ export function HierarchicalSpreadsheetGrid({
                   return (
                     <TableRow key={item.id}>
                       <td className="sticky left-0 bg-background z-10 p-0">
-                        <div className="p-3 pl-6">
-                          {item.name}
+                        <div className="p-3 pl-6 flex items-center justify-between">
+                          <span>{item.name}</span>
+                          {selectedMedia !== "all" && !isDailyView && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteClick(item)}
+                              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                       {columns.map((col, colIndex) => (
@@ -428,12 +540,12 @@ export function HierarchicalSpreadsheetGrid({
           </Table>
         </div>
 
-        {flatAccountItems.length === 0 && (
+        {flatAccountItems.length === 0 && selectedMedia !== "all" && (
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4">勘定項目が設定されていません</p>
-            <Button variant="outline" onClick={loadAccountItems}>
-              勘定項目を初期化
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              設定画面で勘定項目を追加してください
+            </p>
           </div>
         )}
       </CardContent>
@@ -448,6 +560,45 @@ export function HierarchicalSpreadsheetGrid({
         selectedYear={selectedYear}
         onAccountItemsUpdated={loadAccountItems}
       />
+
+      {/* 削除確認ダイアログ */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>項目の削除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === 'category' ? (
+                <>
+                  カテゴリ「<strong>{deleteTarget.item.name}</strong>」とその中のすべての項目を削除します。
+                  <br />
+                  この操作により、関連する予算データも削除されます。
+                </>
+              ) : (
+                <>
+                  項目「<strong>{deleteTarget?.item.name}</strong>」を削除します。
+                  <br />
+                  この操作により、この項目の予算データも削除されます。
+                </>
+              )}
+              <br />
+              <br />
+              この操作は元に戻すことができません。本当に削除しますか？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>
+              キャンセル
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isDeleting ? '削除中...' : '削除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

@@ -52,9 +52,23 @@ export const navData = {
     },
     {
       title: "設定",
-      url: "/settings",
+      url: "#",
       icon: Settings2,
-      items: [],
+      isActive: false,
+      items: [
+        {
+          title: "全体設定",
+          url: "/settings?tab=overall",
+        },
+        {
+          title: "詳細設定",
+          url: "/settings?tab=detailed",
+        },
+        {
+          title: "システム管理",
+          url: "/settings?tab=system",
+        },
+      ],
     },
   ],
 };

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { getMedias, MediaConfig, migrateDataStructure } from '@/lib/media-service';
+import { migrateAccountItemsToMediaId } from '@/lib/account-service';
 import { toast } from 'sonner';
 
 interface MediaContextType {
@@ -31,8 +32,10 @@ export function MediaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const initialize = async () => {
       try {
-        const migrated = await migrateDataStructure();
-        if (migrated) {
+        const migratedV1 = await migrateDataStructure();
+        const migratedV2 = await migrateAccountItemsToMediaId();
+
+        if (migratedV1 || migratedV2) {
           toast.info("データ構造の更新が完了しました。2秒後にリロードします。", { duration: 2000 });
           setTimeout(() => window.location.reload(), 2000);
         } else {
